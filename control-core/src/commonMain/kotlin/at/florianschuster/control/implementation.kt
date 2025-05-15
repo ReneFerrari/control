@@ -5,11 +5,11 @@ import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,15 +22,154 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.scan
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
  * An implementation of [Controller].
  */
 internal class ControllerImplementation<Action, Mutation, State, Effect>(
+    scope: CoroutineScope,
+    dispatcher: CoroutineDispatcher,
+    controllerStart: ControllerStart,
+
+    initialState: State,
+    mutator: EffectMutator<Action, Mutation, State, Effect>,
+    reducer: EffectReducer<Mutation, State, Effect>,
+
+    actionsTransformer: EffectTransformer<Action, Effect>,
+    mutationsTransformer: EffectTransformer<Mutation, Effect>,
+    statesTransformer: EffectTransformer<State, Effect>,
+
+    tag: String,
+    controllerLog: ControllerLog,
+) : BaseControllerImplementation<Action, Mutation, State, Effect>(
+    scope = scope,
+    dispatcher = dispatcher,
+    controllerStart = controllerStart,
+
+    initialState = initialState,
+    mutator = mutator,
+    reducer = reducer,
+
+    actionsTransformer = actionsTransformer,
+    mutationsTransformer = mutationsTransformer,
+    statesTransformer = statesTransformer,
+
+    tag = tag,
+    controllerLog = controllerLog
+) {
+    internal val stateJob = scope.launch(
+        context = dispatcher + CoroutineName(tag),
+        start = CoroutineStart.LAZY
+    ) {
+        initController().collect()
+    }
+
+    init {
+        controllerLog.log { ControllerEvent.Created(tag, controllerStart.logName) }
+        if (controllerStart is ControllerStart.Immediately) {
+            start()
+        }
+    }
+
+    // region manual start + stop
+    internal fun start(): Boolean = if (stateJob.isActive) false else stateJob.start()
+
+    internal fun cancel() {
+        stateJob.cancel()
+    }
+    // endregion
+
+    companion object {
+        internal const val CAPACITY = BaseControllerImplementation.CAPACITY
+
+        internal fun <Action, State, Effect> createMutatorContext(
+            stateAccessor: () -> State,
+            actionFlow: Flow<Action>,
+            effectEmitter: (Effect) -> Unit
+        ) = BaseControllerImplementation.createMutatorContext(
+            stateAccessor = stateAccessor,
+            actionFlow = actionFlow,
+            effectEmitter = effectEmitter
+        )
+
+        internal fun <Effect> createReducerContext(
+            emitter: (Effect) -> Unit
+        ) = BaseControllerImplementation.createReducerContext(emitter)
+
+        internal fun <Effect> createTransformerContext(
+            emitter: (Effect) -> Unit
+        ) = BaseControllerImplementation.createTransformerContext(emitter)
+    }
+}
+
+internal class SubscriberAwareControllerImplementation<Action, Mutation, State, Effect>(
+    scope: CoroutineScope,
+    dispatcher: CoroutineDispatcher,
+
+    initialState: State,
+    mutator: EffectMutator<Action, Mutation, State, Effect>,
+    reducer: EffectReducer<Mutation, State, Effect>,
+
+    actionsTransformer: EffectTransformer<Action, Effect>,
+    mutationsTransformer: EffectTransformer<Mutation, Effect>,
+    statesTransformer: EffectTransformer<State, Effect>,
+
+    tag: String,
+    controllerLog: ControllerLog,
+
+    sharingStarted: SharingStarted
+) : BaseControllerImplementation<Action, Mutation, State, Effect>(
+    scope = scope,
+    dispatcher = dispatcher,
+
+    initialState = initialState,
+    mutator = mutator,
+    reducer = reducer,
+
+    actionsTransformer = actionsTransformer,
+    mutationsTransformer = mutationsTransformer,
+    statesTransformer = statesTransformer,
+
+    tag = tag,
+    controllerLog = controllerLog,
+
+    sharingStarted = sharingStarted
+) {
+    internal val stateFlow = initController().stateIn(
+        scope = scope,
+        started = sharingStarted,
+        initialValue = initialState
+    )
+
+    companion object {
+        internal const val CAPACITY = BaseControllerImplementation.CAPACITY
+
+        internal fun <Action, State, Effect> createMutatorContext(
+            stateAccessor: () -> State,
+            actionFlow: Flow<Action>,
+            effectEmitter: (Effect) -> Unit
+        ) = BaseControllerImplementation.createMutatorContext(
+            stateAccessor = stateAccessor,
+            actionFlow = actionFlow,
+            effectEmitter = effectEmitter
+        )
+
+        internal fun <Effect> createReducerContext(
+            emitter: (Effect) -> Unit
+        ) = BaseControllerImplementation.createReducerContext(emitter)
+
+        internal fun <Effect> createTransformerContext(
+            emitter: (Effect) -> Unit
+        ) = BaseControllerImplementation.createTransformerContext(emitter)
+    }
+}
+
+internal sealed class BaseControllerImplementation<Action, Mutation, State, Effect>(
     val scope: CoroutineScope,
     val dispatcher: CoroutineDispatcher,
-    val controllerStart: ControllerStart,
+    val controllerStart: ControllerStart? = null,
 
     val initialState: State,
     val mutator: EffectMutator<Action, Mutation, State, Effect>,
@@ -41,7 +180,8 @@ internal class ControllerImplementation<Action, Mutation, State, Effect>(
     val statesTransformer: EffectTransformer<State, Effect>,
 
     val tag: String,
-    val controllerLog: ControllerLog
+    val controllerLog: ControllerLog,
+    val sharingStarted: SharingStarted? = null
 ) : EffectController<Action, State, Effect>, EffectControllerStub<Action, State, Effect> {
 
     // region state machine
@@ -53,17 +193,19 @@ internal class ControllerImplementation<Action, Mutation, State, Effect>(
     private val mutableStateFlow = MutableStateFlow(initialState)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    internal val stateJob: Job = scope.launch(
-        context = dispatcher + CoroutineName(tag),
-        start = CoroutineStart.LAZY
-    ) {
+    internal fun initController(): Flow<State> {
         val transformerContext = createTransformerContext(effectEmitter)
 
         val actionFlow: Flow<Action> = transformerContext
             .actionsTransformer(actionSharedFlow.asSharedFlow())
 
         val mutatorContext = createMutatorContext(
-            stateAccessor = { state.value },
+            stateAccessor = {
+                when (this) {
+                    is SubscriberAwareControllerImplementation<*, *, State, *> -> stateFlow.value
+                    is ControllerImplementation<*, *, State, *> -> state.value
+                }
+            },
             actionFlow = actionFlow,
             effectEmitter = effectEmitter
         )
@@ -91,35 +233,13 @@ internal class ControllerImplementation<Action, Mutation, State, Effect>(
                 }
             }
 
-        transformerContext.statesTransformer(stateFlow)
+        return transformerContext.statesTransformer(stateFlow)
             .onStart { controllerLog.log { ControllerEvent.Started(tag) } }
             .onEach { state ->
                 controllerLog.log { ControllerEvent.State(tag, state.toString()) }
                 mutableStateFlow.value = state
             }
             .onCompletion { controllerLog.log { ControllerEvent.Completed(tag) } }
-            .collect()
-    }
-
-    // endregion
-
-    // region controller
-
-    override val state: StateFlow<State>
-        get() = if (stubEnabled) {
-            stubbedStateFlow.asStateFlow()
-        } else {
-            if (controllerStart is ControllerStart.Lazy) start()
-            mutableStateFlow.asStateFlow()
-        }
-
-    override fun dispatch(action: Action) {
-        if (stubEnabled) {
-            stubbedActions.add(action)
-        } else {
-            if (controllerStart is ControllerStart.Lazy) start()
-            actionSharedFlow.tryEmit(action)
-        }
     }
 
     // endregion
@@ -141,20 +261,46 @@ internal class ControllerImplementation<Action, Mutation, State, Effect>(
         get() = if (stubEnabled) {
             stubbedEffectChannel.receiveAsFlow().cancellable()
         } else {
-            if (controllerStart is ControllerStart.Lazy) start()
+            if (
+                this is ControllerImplementation &&
+                controllerStart is ControllerStart.Lazy
+            ) {
+                start()
+            }
             effectChannel.receiveAsFlow().cancellable()
         }
 
     // endregion
 
-    // region manual start + stop
+    // region controller
 
-    internal fun start(): Boolean {
-        return if (stateJob.isActive) false else stateJob.start()
-    }
+    override val state: StateFlow<State>
+        get() = if (stubEnabled) {
+            stubbedStateFlow.asStateFlow()
+        } else {
+            when (this) {
+                is SubscriberAwareControllerImplementation<*, *, State, *> -> stateFlow
+                is ControllerImplementation<*, *, State, *> -> {
+                    if (controllerStart is ControllerStart.Lazy) {
+                        start()
+                    }
+                    mutableStateFlow.asStateFlow()
+                }
+            }
+        }
 
-    internal fun cancel() {
-        stateJob.cancel()
+    override fun dispatch(action: Action) {
+        if (stubEnabled) {
+            stubbedActions.add(action)
+        } else {
+            if (
+                this is ControllerImplementation &&
+                controllerStart is ControllerStart.Lazy
+            ) {
+                start()
+            }
+            actionSharedFlow.tryEmit(action)
+        }
     }
 
     // endregion
@@ -179,13 +325,6 @@ internal class ControllerImplementation<Action, Mutation, State, Effect>(
     }
 
     // endregion
-
-    init {
-        controllerLog.log { ControllerEvent.Created(tag, controllerStart.logName) }
-        if (controllerStart is ControllerStart.Immediately) {
-            start()
-        }
-    }
 
     companion object {
         internal const val CAPACITY = 64

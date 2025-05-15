@@ -2,6 +2,7 @@ package at.florianschuster.control.counter
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
 import kotlin.system.exitProcess
 
 private const val AvailableCommands = "available commands -> + , - , exit"
@@ -14,7 +15,7 @@ internal fun main(args : Array<String>) {
     println("🎛 <control-counter>")
     println("$AvailableCommands\n")
 
-    val controller = CoroutineScope(Dispatchers.Unconfined).createCounterController()
+    val controller = CoroutineScope(Dispatchers.Unconfined).createCounterController(sharingStarted = SharingStarted.WhileSubscribed(0))
 
     while (true) {
         when (readlnOrNull()) {

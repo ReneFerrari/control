@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.emptyFlow
 
 /**
@@ -87,6 +88,63 @@ fun <Action, Mutation, State, Effect> CoroutineScope.createEffectController(
     statesTransformer = statesTransformer,
 
     tag = tag, controllerLog = controllerLog
+)
+
+fun <Action, Mutation, State, Effect> CoroutineScope.createSubscriberAwareEffectController(
+
+    /**
+     * The initial [State] for the internal state machine.
+     */
+    initialState: State,
+    /**
+     * See [EffectMutator].
+     */
+    mutator: EffectMutator<Action, Mutation, State, Effect> = { _ -> emptyFlow() },
+    /**
+     * See [EffectReducer].
+     */
+    reducer: EffectReducer<Mutation, State, Effect> = { _, previousState -> previousState },
+
+    /**
+     * See [EffectTransformer].
+     */
+    actionsTransformer: EffectTransformer<Action, Effect> = { it },
+    mutationsTransformer: EffectTransformer<Mutation, Effect> = { it },
+    statesTransformer: EffectTransformer<State, Effect> = { it },
+
+    /**
+     * Used for [ControllerLog] and as [CoroutineName] for the internal state machine.
+     */
+    tag: String = defaultControllerTag(),
+    /**
+     * Log configuration for [ControllerEvent]s. See [ControllerLog].
+     */
+    controllerLog: ControllerLog = ControllerLog.None,
+
+    /**
+     * Override to launch the internal state machine [Flow] in a different [CoroutineDispatcher]
+     * than the one used in the [CoroutineScope.coroutineContext].
+     *
+     * [Mutator] and [Reducer] will run on this [CoroutineDispatcher].
+     */
+    dispatcher: CoroutineDispatcher = defaultScopeDispatcher(),
+
+    /**
+     * Automatically starts / stops [Controller] based on Subscriber(s).
+     * See Kotlin documentation for [SharingStarted]: https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/-sharing-started/
+     * If on Android, check the Android Documentation as well: https://developer.android.com/kotlin/flow/stateflow-and-sharedflow
+     */
+    sharingStarted: SharingStarted
+): EffectController<Action, State, Effect> = SubscriberAwareControllerImplementation(
+    scope = this, dispatcher = dispatcher,
+
+    initialState = initialState, mutator = mutator, reducer = reducer,
+    actionsTransformer = actionsTransformer,
+    mutationsTransformer = mutationsTransformer,
+    statesTransformer = statesTransformer,
+
+    tag = tag, controllerLog = controllerLog,
+    sharingStarted = sharingStarted
 )
 
 /**

@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 
@@ -131,7 +132,7 @@ fun <Action, Mutation, State> CoroutineScope.createController(
      *
      * [Mutator] and [Reducer] will run on this [CoroutineDispatcher].
      */
-    dispatcher: CoroutineDispatcher = defaultScopeDispatcher()
+    dispatcher: CoroutineDispatcher = defaultScopeDispatcher(),
 ): Controller<Action, State> = ControllerImplementation<Action, Mutation, State, Nothing>(
     scope = this, dispatcher = dispatcher, controllerStart = controllerStart,
 
@@ -141,6 +142,63 @@ fun <Action, Mutation, State> CoroutineScope.createController(
     statesTransformer = statesTransformer,
 
     tag = tag, controllerLog = controllerLog
+)
+
+
+fun <Action, Mutation, State> CoroutineScope.createSubscriberAwareController(
+    /**
+     * The initial [State] for the internal state machine.
+     */
+    initialState: State,
+    /**
+     * See [Mutator].
+     */
+    mutator: Mutator<Action, Mutation, State> = { _ -> emptyFlow() },
+    /**
+     * See [Reducer].
+     */
+    reducer: Reducer<Mutation, State> = { _, previousState -> previousState },
+
+    /**
+     * See [Transformer].
+     */
+    actionsTransformer: Transformer<Action> = { it },
+    mutationsTransformer: Transformer<Mutation> = { it },
+    statesTransformer: Transformer<State> = { it },
+
+    /**
+     * Used for [ControllerLog] and as [CoroutineName] for the internal state machine.
+     */
+    tag: String = defaultControllerTag(),
+    /**
+     * Log configuration for [ControllerEvent]s. See [ControllerLog].
+     */
+    controllerLog: ControllerLog = ControllerLog.None,
+
+    /**
+     * Override to launch the internal state machine [Flow] in a different [CoroutineDispatcher]
+     * than the one used in the [CoroutineScope.coroutineContext].
+     *
+     * [Mutator] and [Reducer] will run on this [CoroutineDispatcher].
+     */
+    dispatcher: CoroutineDispatcher = defaultScopeDispatcher(),
+
+    /**
+     * Automatically starts / stops [Controller] based on Subscriber(s).
+     * See Kotlin documentation for [SharingStarted]: https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/-sharing-started/
+     * If on Android, check the Android Documentation as well: https://developer.android.com/kotlin/flow/stateflow-and-sharedflow
+     */
+    sharingStarted: SharingStarted,
+): Controller<Action, State> = SubscriberAwareControllerImplementation<Action, Mutation, State, Nothing>(
+    scope = this, dispatcher = dispatcher,
+
+    initialState = initialState, mutator = mutator, reducer = reducer,
+    actionsTransformer = actionsTransformer,
+    mutationsTransformer = mutationsTransformer,
+    statesTransformer = statesTransformer,
+
+    tag = tag, controllerLog = controllerLog,
+    sharingStarted = sharingStarted
 )
 
 /**

@@ -15,7 +15,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -27,21 +26,30 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
 
 @Composable
 internal fun CounterScreen(
     scope: CoroutineScope = rememberCoroutineScope(),
-    controller: CounterController = remember(scope) { scope.createCounterController() }
+    controller: CounterController = remember(scope) { scope.createCounterController(sharingStarted = SharingStarted.WhileSubscribedOrRetained) },
+    showNext: () -> Unit
 ) {
-    val state by controller.state.collectAsState()
-    CounterView(state = state, dispatch = controller::dispatch)
+    val state by controller.state.collectAsStateWithLifecycle(minActiveState = Lifecycle.State.RESUMED)
+    CounterView(
+        state = state,
+        dispatch = controller::dispatch,
+        showNext = showNext
+    )
 }
 
 @Composable
 private fun CounterView(
     state: CounterState,
-    dispatch: (CounterAction) -> Unit = {}
+    dispatch: (CounterAction) -> Unit = {},
+    showNext: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -75,6 +83,7 @@ private fun CounterView(
                 onClick = { dispatch(CounterAction.Increment) },
             ) { Text("+") }
         }
+        Button(onClick = showNext) { Text("Show other activity") }
         if (state.loading) {
             CircularProgressIndicator(
                 modifier = Modifier
@@ -92,7 +101,8 @@ private fun CounterView(
 private fun Preview() {
     MaterialTheme {
         CounterView(
-            state = CounterState(value = 1, loading = false)
+            state = CounterState(value = 1, loading = false),
+            showNext = {}
         )
     }
 }
@@ -102,7 +112,8 @@ private fun Preview() {
 private fun Preview_Loading() {
     MaterialTheme {
         CounterView(
-            state = CounterState(value = 2, loading = true)
+            state = CounterState(value = 2, loading = true),
+            showNext = {}
         )
     }
 }
