@@ -2,7 +2,7 @@ package at.florianschuster.control.counter
 
 import at.florianschuster.control.Controller
 import at.florianschuster.control.ControllerLog
-import at.florianschuster.control.createSubscriberAwareController
+import at.florianschuster.control.createController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,7 +45,7 @@ data class CounterState(
 fun CoroutineScope.createCounterController(
     initialValue: Int = 0,
     sharingStarted: SharingStarted
-): CounterController = createSubscriberAwareController<CounterAction, CounterMutation, CounterState>(
+): CounterController = createController<CounterAction, CounterMutation, CounterState>(
     // we start with the initial state
     initialState = CounterState(value = initialValue, loading = false),
     mutationsTransformer = { mutations ->

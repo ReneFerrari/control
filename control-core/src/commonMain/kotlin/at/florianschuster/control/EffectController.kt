@@ -90,7 +90,7 @@ fun <Action, Mutation, State, Effect> CoroutineScope.createEffectController(
     tag = tag, controllerLog = controllerLog
 )
 
-fun <Action, Mutation, State, Effect> CoroutineScope.createSubscriberAwareEffectController(
+fun <Action, Mutation, State, Effect> CoroutineScope.createEffectController(
 
     /**
      * The initial [State] for the internal state machine.

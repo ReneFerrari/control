@@ -145,7 +145,7 @@ fun <Action, Mutation, State> CoroutineScope.createController(
 )
 
 
-fun <Action, Mutation, State> CoroutineScope.createSubscriberAwareController(
+fun <Action, Mutation, State> CoroutineScope.createController(
     /**
      * The initial [State] for the internal state machine.
      */
