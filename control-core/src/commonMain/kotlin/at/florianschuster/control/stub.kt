@@ -33,7 +33,10 @@ interface ControllerStub<Action, State> : Controller<Action, State> {
  */
 @TestOnlyStub
 fun <Action, State> Controller<Action, State>.toStub(): ControllerStub<Action, State> {
-    require(this is ControllerImplementation<Action, *, State, *>) {
+    require(
+        this is BaseControllerImplementation<Action, *, State, *> &&
+                (this is ControllerImplementation<Action, *, State, *> || this is SubscriberAwareControllerImplementation<Action, *, State, *>)
+    ) {
         "Cannot stub a custom implementation of a Controller."
     }
     if (!stubEnabled) {
@@ -63,9 +66,13 @@ interface EffectControllerStub<Action, State, Effect> : ControllerStub<Action, S
  */
 @TestOnlyStub
 fun <Action, State, Effect> EffectController<Action, State, Effect>.toStub(): EffectControllerStub<Action, State, Effect> {
-    require(this is ControllerImplementation<Action, *, State, Effect>) {
+    require(
+        this is BaseControllerImplementation<Action, *, State, Effect> &&
+                (this is ControllerImplementation<Action, *, State, Effect> || this is SubscriberAwareControllerImplementation<Action, *, State, Effect>)
+    ) {
         "Cannot stub a custom implementation of a EffectController."
     }
+
     if (!stubEnabled) {
         controllerLog.log { ControllerEvent.Stub(tag) }
         stubEnabled = true

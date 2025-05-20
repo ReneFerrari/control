@@ -143,6 +143,10 @@ internal class SubscriberAwareControllerImplementation<Action, Mutation, State, 
         initialValue = initialState
     )
 
+    init {
+        controllerLog.log { ControllerEvent.Created(tag, ControllerStart.Immediately.logName) }
+    }
+
     companion object {
         internal const val CAPACITY = BaseControllerImplementation.CAPACITY
 
