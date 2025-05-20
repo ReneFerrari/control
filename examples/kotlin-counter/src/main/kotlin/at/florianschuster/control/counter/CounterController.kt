@@ -1,11 +1,14 @@
 package at.florianschuster.control.counter
 
-import at.florianschuster.control.ControllerLog
 import at.florianschuster.control.Controller
+import at.florianschuster.control.ControllerLog
 import at.florianschuster.control.createController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlin.time.Duration.Companion.milliseconds
 
 typealias CounterController = Controller<CounterAction, CounterState>
@@ -24,6 +27,7 @@ sealed interface CounterAction {
 private sealed interface CounterMutation {
     data object IncreaseValue : CounterMutation
     data object DecreaseValue : CounterMutation
+    data class UpdateTimeStamp(val time: Long): CounterMutation
     data class SetLoading(val loading: Boolean) : CounterMutation
 }
 
@@ -39,12 +43,25 @@ data class CounterState(
  * creates a [CounterController] from the [CoroutineScope].
  */
 fun CoroutineScope.createCounterController(
-    initialValue: Int = 0
-): CounterController = createController(
-
+    initialValue: Int = 0,
+    sharingStarted: SharingStarted
+): CounterController = createController<CounterAction, CounterMutation, CounterState>(
     // we start with the initial state
     initialState = CounterState(value = initialValue, loading = false),
-
+    mutationsTransformer = { mutations ->
+        merge(
+            mutations,
+            flow {
+                while (true) {
+                    delay(1_000)
+                    emit(1)
+                }
+            }.map {
+                println("TestController  Tick")
+                CounterMutation.UpdateTimeStamp(System.currentTimeMillis())
+            }
+        )
+    },
     // every action is transformed into [0..n] mutations
     mutator = { action ->
         when (action) {
@@ -71,9 +88,11 @@ fun CoroutineScope.createCounterController(
             is CounterMutation.IncreaseValue -> previousState.copy(value = previousState.value + 1)
             is CounterMutation.DecreaseValue -> previousState.copy(value = previousState.value - 1)
             is CounterMutation.SetLoading -> previousState.copy(loading = mutation.loading)
+            is CounterMutation.UpdateTimeStamp -> previousState
         }
     },
 
     // logs to println
-    controllerLog = ControllerLog.Println
+    controllerLog = ControllerLog.Println,
+    sharingStarted = sharingStarted
 )

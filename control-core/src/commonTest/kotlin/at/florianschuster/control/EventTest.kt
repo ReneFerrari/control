@@ -1,7 +1,10 @@
 package at.florianschuster.control
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlin.test.Test
@@ -124,6 +127,118 @@ internal class EventTest {
         }
     }
 
+    @Test
+    fun `SubscriberAwareControllerImplementation logs events correctly`() {
+        val events = mutableListOf<ControllerEvent>()
+        val testScope = TestScope(UnconfinedTestDispatcher())
+        val sut = testScope.subscriberAwareEventsController(events)
+
+        assertTrue(events.last() is ControllerEvent.Created)
+        assertTrue(ControllerStart.Immediately.logName in events.last().toString())
+
+        val job = sut.state.launchIn(testScope)
+
+        events.takeLast(2).let { lastEvents ->
+            assertTrue(lastEvents[0] is ControllerEvent.Started)
+            assertTrue(lastEvents[1] is ControllerEvent.State)
+        }
+
+        sut.dispatch(1)
+        events.takeLast(3).let { lastEvents ->
+            assertTrue(lastEvents[0] is ControllerEvent.Action)
+            assertTrue(lastEvents[1] is ControllerEvent.Mutation)
+            assertTrue(lastEvents[2] is ControllerEvent.State)
+        }
+
+        sut.dispatch(EFFECT_VALUE)
+        events.takeLast(4).let { lastEvents ->
+            assertTrue(lastEvents[0] is ControllerEvent.Action)
+            assertTrue(lastEvents[1] is ControllerEvent.Effect)
+            assertTrue(lastEvents[2] is ControllerEvent.Mutation)
+            assertTrue(lastEvents[3] is ControllerEvent.State)
+        }
+
+        job.cancel()
+        assertTrue(events.last() is ControllerEvent.Completed)
+    }
+
+    @Test
+    fun `SubscriberAwareControllerStub logs event correctly`() {
+        val events = mutableListOf<ControllerEvent>()
+        val testScope = TestScope()
+        val sut: Controller<Int, Int> = testScope.subscriberAwareEventsController(events)
+
+        sut.state.launchIn(testScope)
+
+        sut.toStub()
+        assertTrue(events.last() is ControllerEvent.Stub)
+
+        events.clear()
+        sut.toStub()
+        assertEquals(0, events.count())
+    }
+
+    @Test
+    fun `SubscriberAwareEffectControllerStub logs event correctly`() {
+        val events = mutableListOf<ControllerEvent>()
+        val testScope = TestScope()
+        val sut: EffectController<Int, Int, Int> = testScope.subscriberAwareEventsController(events)
+
+        sut.state.launchIn(testScope)
+
+        sut.toStub()
+        assertTrue(events.last() is ControllerEvent.Stub)
+
+        events.clear()
+        sut.toStub()
+        assertEquals(0, events.count())
+    }
+
+    @Test
+    fun `SubscriberAwareControllerImplementation logs mutator error correctly`() {
+        val events = mutableListOf<ControllerEvent>()
+        val testScope = TestScope(UnconfinedTestDispatcher())
+        val sut = testScope.subscriberAwareEventsController(events)
+
+        sut.state.launchIn(testScope)
+
+        sut.dispatch(MUTATOR_ERROR_VALUE)
+        events.takeLast(2).let { lastEvents ->
+            assertTrue(lastEvents[0] is ControllerEvent.Error)
+            assertTrue(lastEvents[1] is ControllerEvent.Completed)
+        }
+    }
+
+    @Test
+    fun `SubscriberAwareControllerImplementation logs reducer error correctly`() {
+        val events = mutableListOf<ControllerEvent>()
+        val testScope = TestScope(UnconfinedTestDispatcher())
+        val sut = testScope.subscriberAwareEventsController(events)
+
+        sut.state.launchIn(testScope)
+        sut.dispatch(REDUCER_ERROR_VALUE)
+        events.takeLast(2).let { lastEvents ->
+            assertTrue(lastEvents[0] is ControllerEvent.Error)
+            assertTrue(lastEvents[1] is ControllerEvent.Completed)
+        }
+    }
+
+    @Test
+    fun `SubscriberAwareControllerImplementation logs effect error correctly`() {
+        val events = mutableListOf<ControllerEvent>()
+        val testScope = TestScope(UnconfinedTestDispatcher())
+        val sut = testScope.subscriberAwareEventsController(events)
+
+        sut.state.launchIn(testScope)
+        repeat(ControllerImplementation.CAPACITY) { sut.dispatch(EFFECT_VALUE) }
+        sut.dispatch(EFFECT_VALUE)
+
+        events.takeLast(2).let { lastEvents ->
+            assertTrue(lastEvents[0] is ControllerEvent.Error)
+            assertTrue(lastEvents[1] is ControllerEvent.Completed)
+        }
+    }
+
     private fun CoroutineScope.eventsController(
         events: MutableList<ControllerEvent>,
         controllerStart: ControllerStart = ControllerStart.Lazy
@@ -148,6 +263,32 @@ internal class EventTest {
         statesTransformer = { it },
         tag = "ImplementationEventTest.EventsController",
         controllerLog = ControllerLog.Custom { events.add(event) }
+    )
+
+    private fun CoroutineScope.subscriberAwareEventsController(
+        events: MutableList<ControllerEvent>,
+        sharingStarted: SharingStarted = SharingStarted.WhileSubscribed()
+    ) = SubscriberAwareControllerImplementation<Int, Int, Int, Int>(
+        scope = this,
+        dispatcher = defaultScopeDispatcher(),
+        initialState = 0,
+        mutator = { action ->
+            flow {
+                if (action == EFFECT_VALUE) emitEffect(EFFECT_VALUE)
+                check(action != MUTATOR_ERROR_VALUE)
+                emit(action)
+            }
+        },
+        reducer = { mutation, previousState ->
+            check(mutation != REDUCER_ERROR_VALUE)
+            previousState
+        },
+        actionsTransformer = { it },
+        mutationsTransformer = { it },
+        statesTransformer = { it },
+        tag = "ImplementationEventTest.SubscriberAwareEventsController",
+        controllerLog = ControllerLog.Custom { events.add(event) },
+        sharingStarted = sharingStarted,
     )
 
     companion object {
